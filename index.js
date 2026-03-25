@@ -1,9 +1,12 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
+const qrcode = require('qrcode');
 const express = require('express');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+let qrCodeData = null;
+let isReady = false;
 
 // WhatsApp Client
 const client = new Client({
@@ -16,30 +19,43 @@ const client = new Client({
 
 // QR Code
 client.on('qr', (qr) => {
-    console.log('QR Code received, scan with WhatsApp:');
-    qrcode.generate(qr, { small: true });
+    console.log('QR Code received');
+    qrCodeData = qr;
 });
 
 // Ready
 client.on('ready', () => {
     console.log('WhatsApp Bot is ready!');
+    isReady = true;
+    qrCodeData = null;
 });
 
 // Incoming messages
 client.on('message', async (message) => {
     console.log(`Message from ${message.from}: ${message.body}`);
-    
-    // Auto reply example
-    if (message.body.toLowerCase() === 'hi') {
-        message.reply('Hello! How can I help you?');
-    }
 });
 
 client.initialize();
 
-// Keep alive server
-app.get('/', (req, res) => {
-    res.send('WhatsApp Bot is running!');
+// QR Code page
+app.get('/', async (req, res) => {
+    if (isReady) {
+        res.send('<h1>✅ WhatsApp Bot Connected!</h1>');
+    } else if (qrCodeData) {
+        const qrImage = await qrcode.toDataURL(qrCodeData);
+        res.send(`
+            <html>
+            <body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:Arial">
+                <h1>Scan QR Code with WhatsApp</h1>
+                <img src="${qrImage}" style="width:300px;height:300px"/>
+                <p>Open WhatsApp → Linked Devices → Link a Device</p>
+                <script>setTimeout(()=>location.reload(),20000)</script>
+            </body>
+            </html>
+        `);
+    } else {
+        res.send('<h1>⏳ Loading... Refresh in a few seconds</h1><script>setTimeout(()=>location.reload(),3000)</script>');
+    }
 });
 
 app.listen(PORT, () => {
