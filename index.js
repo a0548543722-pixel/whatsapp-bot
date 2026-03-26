@@ -6,16 +6,12 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-
-// Supabase
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
 let qrCodeData = null;
 let isReady = false;
 let client = null;
 
-// Initialize WhatsApp Client
 function initClient() {
     client = new Client({
         authStrategy: new LocalAuth(),
@@ -43,52 +39,29 @@ function initClient() {
         
         console.log(`Message from ${from}: ${body}`);
         
-        // Save to Supabase
-        if (SUPABASE_URL && SUPABASE_KEY && !isGroup) {
+        // Send to webhook (only private messages)
+        if (WEBHOOK_URL && !isGroup) {
             try {
                 const phone = from.replace('@c.us', '');
-                
-                // Save conversation
-                await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_conversations`, {
+                await fetch(WEBHOOK_URL, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'apikey': SUPABASE_KEY,
-                        'Authorization': `Bearer ${SUPABASE_KEY}`,
-                        'Prefer': 'resolution=merge-duplicates'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        phone_number: phone,
-                        last_message: body,
-                        last_message_at: new Date().toISOString()
-                    })
-                });
-                
-                // Save message
-                await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'apikey': SUPABASE_KEY,
-                        'Authorization': `Bearer ${SUPABASE_KEY}`
-                    },
-                    body: JSON.stringify({
-                        phone_number: phone,
+                        type: 'incoming',
+                        phone: phone,
                         message: body,
-                        direction: 'incoming',
-                        status: 'received'
+                        timestamp: new Date().toISOString()
                     })
                 });
-                
-                console.log('Message saved to CRM');
+                console.log('Message sent to webhook');
             } catch (err) {
-                console.error('Error saving to CRM:', err.message);
+                console.error('Webhook error:', err.message);
             }
         }
     });
 
     client.on('disconnected', () => {
-        console.log('WhatsApp disconnected, reinitializing...');
+        console.log('Disconnected, reinitializing...');
         isReady = false;
         setTimeout(initClient, 5000);
     });
@@ -115,7 +88,7 @@ app.get('/', async (req, res) => {
             </html>
         `);
     } else {
-        res.send('<h1>⏳ Loading... Refresh in a few seconds</h1><script>setTimeout(()=>location.reload(),3000)</script>');
+        res.send('<h1>⏳ Loading...</h1><script>setTimeout(()=>location.reload(),3000)</script>');
     }
 });
 
@@ -127,36 +100,11 @@ app.post('/send', async (req, res) => {
         return res.status(503).json({ error: 'WhatsApp not connected' });
     }
     
-    if (!phone || !message) {
-        return res.status(400).json({ error: 'Phone and message required' });
-    }
-    
     try {
         const chatId = phone.includes('@c.us') ? phone : `${phone}@c.us`;
         await client.sendMessage(chatId, message);
-        
-        // Save outgoing message to Supabase
-        if (SUPABASE_URL && SUPABASE_KEY) {
-            const cleanPhone = phone.replace('@c.us', '');
-            await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'apikey': SUPABASE_KEY,
-                    'Authorization': `Bearer ${SUPABASE_KEY}`
-                },
-                body: JSON.stringify({
-                    phone_number: cleanPhone,
-                    message: message,
-                    direction: 'outgoing',
-                    status: 'sent'
-                })
-            });
-        }
-        
-        res.json({ success: true, message: 'Message sent' });
+        res.json({ success: true });
     } catch (err) {
-        console.error('Error sending message:', err);
         res.status(500).json({ error: err.message });
     }
 });
